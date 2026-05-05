@@ -19,7 +19,6 @@ const SCALES = {
 const STYLES = {
   boombap: {
     name: 'Boom Bap', bpm: 92, swing: 24, seventh: false,
-    progression: [0, 5, 6, 4],
     pattern: {
       kick:  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -29,7 +28,6 @@ const STYLES = {
   },
   trap: {
     name: 'Trap', bpm: 142, swing: 0, seventh: false,
-    progression: [0, 6, 5, 4],
     pattern: {
       kick:  [1,0,0,0, 0,0,1,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -39,7 +37,6 @@ const STYLES = {
   },
   lofi: {
     name: 'Lo-fi', bpm: 78, swing: 50, seventh: true,
-    progression: [1, 4, 0, 5],
     pattern: {
       kick:  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -49,7 +46,6 @@ const STYLES = {
   },
   drill: {
     name: 'Drill', bpm: 144, swing: 0, seventh: false,
-    progression: [0, 3, 6, 5],
     pattern: {
       kick:  [1,0,0,0, 0,0,1,0, 0,0,1,1, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -59,7 +55,6 @@ const STYLES = {
   },
   jazzhop: {
     name: 'Jazz-hop', bpm: 88, swing: 40, seventh: true,
-    progression: [1, 4, 0, 5],
     pattern: {
       kick:  [1,0,0,0, 0,0,0,1, 0,0,0,0, 0,1,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -76,13 +71,13 @@ const TRACKS = [
   { id: 'oh',    label: 'Open Hat' }
 ];
 
-// ---------- Chord progression presets ----------
+// ---------- Chord progression presets (rap / freestyle staples) ----------
 const CHORD_PRESETS = [
-  { name: 'I–V–vi–IV',     scale: 'major', degrees: [0, 4, 5, 3] },
-  { name: 'ii–V–I',        scale: 'major', degrees: [1, 4, 0, 0] },
-  { name: 'I–vi–IV–V',     scale: 'major', degrees: [0, 5, 3, 4] },
-  { name: 'i–VII–VI–VII',  scale: 'minor', degrees: [0, 6, 5, 6] },
-  { name: 'i–VI–III–VII',  scale: 'minor', degrees: [0, 5, 2, 6] }
+  { name: 'i–VII–VI–VII (Lose Yourself)', scale: 'minor', degrees: [0, 6, 5, 6] },
+  { name: 'i–VI–III–VII (Mockingbird)',   scale: 'minor', degrees: [0, 5, 2, 6] },
+  { name: 'i–VI–VII–i (Drill)',           scale: 'minor', degrees: [0, 5, 6, 0] },
+  { name: 'i–iv–VII–III (Boom Bap)',      scale: 'minor', degrees: [0, 3, 6, 2] },
+  { name: 'i–VII–VI–i (Started)',         scale: 'minor', degrees: [0, 6, 5, 0] }
 ];
 
 // ---------- App state ----------
@@ -423,6 +418,16 @@ function stop() {
 }
 
 // ---------- UI rendering ----------
+let openTrackPopover = null;
+function closeOpenTrackPopover() {
+  if (openTrackPopover) {
+    openTrackPopover.classList.remove('open');
+    openTrackPopover = null;
+  }
+}
+
+const MIXER_ICON_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="2" y="4" width="2" height="8"/><rect x="7" y="2" width="2" height="12"/><rect x="12" y="6" width="2" height="6"/></svg>';
+
 function renderGrid() {
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
@@ -438,6 +443,29 @@ function renderGrid() {
     label.textContent = t.label;
     head.appendChild(label);
 
+    const toggleWrap = document.createElement('div');
+    toggleWrap.className = 'track-toggle-wrap';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'track-toggle';
+    toggleBtn.type = 'button';
+    toggleBtn.title = `${t.label} mixer`;
+    toggleBtn.innerHTML = MIXER_ICON_SVG;
+    toggleBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const wasOpen = toggleWrap.classList.contains('open');
+      closeOpenTrackPopover();
+      if (!wasOpen) {
+        toggleWrap.classList.add('open');
+        openTrackPopover = toggleWrap;
+      }
+    });
+    toggleWrap.appendChild(toggleBtn);
+
+    const controls = document.createElement('div');
+    controls.className = 'track-controls';
+    controls.addEventListener('click', e => e.stopPropagation());
+
     const vol = document.createElement('input');
     vol.type = 'range';
     vol.className = 'track-vol';
@@ -445,17 +473,21 @@ function renderGrid() {
     vol.value = Math.round(state.volumes[t.id] * 100);
     vol.title = `${t.label} volume`;
     vol.addEventListener('input', () => { state.volumes[t.id] = vol.value / 100; });
-    head.appendChild(vol);
+    controls.appendChild(vol);
 
     const mute = document.createElement('button');
     mute.className = 'track-mute' + (state.muted[t.id] ? ' muted' : '');
     mute.textContent = 'M';
+    mute.type = 'button';
     mute.title = `Mute ${t.label}`;
     mute.addEventListener('click', () => {
       state.muted[t.id] = !state.muted[t.id];
       mute.classList.toggle('muted', state.muted[t.id]);
     });
-    head.appendChild(mute);
+    controls.appendChild(mute);
+
+    toggleWrap.appendChild(controls);
+    head.appendChild(toggleWrap);
 
     track.appendChild(head);
 
@@ -564,17 +596,9 @@ function applyStyle(styleKey) {
   document.getElementById('swing').value = state.swing;
   document.getElementById('swingVal').textContent = state.swing + '%';
 
-  const max = getChordScale().length;
-  state.chordSlots.forEach((slot, i) => {
-    slot.degree = (s.progression[i] || 0) % max;
-    slot.on = true;
-  });
-
-  document.querySelectorAll('#styleTabs button').forEach(b => {
-    b.classList.toggle('active', b.dataset.style === styleKey);
-  });
+  const drumSel = document.getElementById('drumPreset');
+  if (drumSel) drumSel.value = styleKey;
   renderGrid();
-  renderChordSlots();
 }
 
 function setBPM(bpm) {
@@ -704,7 +728,6 @@ function init() {
   const masterSlider = document.getElementById('master');
   masterSlider.addEventListener('input', () => {
     state.master = masterSlider.value / 100;
-    document.getElementById('masterVal').textContent = masterSlider.value + '%';
     if (masterGain) masterGain.gain.setTargetAtTime(state.master, ctx.currentTime, 0.02);
   });
 
@@ -712,29 +735,34 @@ function init() {
     state.chordsPerBar = parseInt(e.target.value, 10);
   });
 
-  // Style segmented control
-  const tabs = document.getElementById('styleTabs');
+  // Drum preset dropdown
+  const drumSel = document.getElementById('drumPreset');
   Object.keys(STYLES).forEach(key => {
-    const btn = document.createElement('button');
-    btn.textContent = STYLES[key].name;
-    btn.dataset.style = key;
-    btn.addEventListener('click', () => applyStyle(key));
-    tabs.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = STYLES[key].name;
+    drumSel.appendChild(opt);
   });
+  drumSel.addEventListener('change', () => applyStyle(drumSel.value));
   applyStyle('boombap');
 
-  // Chord preset segmented control
-  const chordPresetTabs = document.getElementById('chordPresets');
+  // Chord preset dropdown
+  const chordSel = document.getElementById('chordPreset');
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Choose a progression…';
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  chordSel.appendChild(placeholder);
   CHORD_PRESETS.forEach((p, i) => {
-    const btn = document.createElement('button');
-    btn.textContent = p.name;
-    btn.dataset.idx = i;
-    btn.addEventListener('click', () => {
-      applyChordPreset(p);
-      chordPresetTabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-    chordPresetTabs.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = p.name;
+    chordSel.appendChild(opt);
+  });
+  chordSel.addEventListener('change', () => {
+    const idx = parseInt(chordSel.value, 10);
+    if (!isNaN(idx)) applyChordPreset(CHORD_PRESETS[idx]);
   });
 
   // Transport
@@ -749,6 +777,12 @@ function init() {
     const allOff = state.chordSlots.every(s => !s.on);
     state.chordSlots.forEach(s => { s.on = allOff; });
     renderChordSlots();
+  });
+
+  document.addEventListener('click', e => {
+    if (openTrackPopover && !openTrackPopover.contains(e.target)) {
+      closeOpenTrackPopover();
+    }
   });
 }
 

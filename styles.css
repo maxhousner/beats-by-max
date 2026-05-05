@@ -49,14 +49,14 @@ h1.brand {
   font-weight: 800;
   font-style: italic;
   letter-spacing: -0.05em;
-  line-height: 1;
+  line-height: 1.2;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 70%, #0f172a 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
   display: inline-block;
-  padding: 0 4px;
+  padding: 2px 6px 6px;
 }
 
 .subtitle {
@@ -124,44 +124,27 @@ button.primary {
 }
 button.primary:hover { filter: brightness(1.05); }
 
-/* Segmented control — always one line */
-.segmented {
+/* Preset dropdown rows — full label always visible */
+.preset-row {
   display: flex;
-  flex-wrap: nowrap;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-  width: 100%;
-  overflow: hidden;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 14px;
 }
-.segmented button {
-  flex: 1 1 0;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
+.preset-label {
+  font-size: 12px;
   color: var(--ink-soft);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.12s ease, color 0.12s ease;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: 0 0 auto;
 }
-.segmented button:hover {
-  color: var(--ink);
-  background: rgba(255,255,255,0.6);
-}
-.segmented button.active {
-  background: var(--panel);
-  color: var(--accent);
-  box-shadow: 0 1px 2px rgba(20,24,50,0.08), 0 0 0 1px var(--line);
-  font-weight: 600;
+.preset-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 280px;
+  padding: 7px 28px 7px 10px;
+  font-size: 14px;
 }
 
 /* Transport */
@@ -170,11 +153,24 @@ button.primary:hover { filter: brightness(1.05); }
   align-items: center;
   gap: 18px;
 }
-.transport-row .control-master {
+.master-vol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: 1 1 0;
   min-width: 0;
   max-width: 360px;
   margin-left: auto;
+}
+.master-vol .vol-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+}
+.master-vol input[type=range] {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .play-btn {
   font-size: 16px;
@@ -185,15 +181,30 @@ button.primary:hover { filter: brightness(1.05); }
   padding: 10px 22px;
 }
 
-/* Tempo (lives inside the Drums card) — left-justified, BPM 2x Swing max */
-.tempo-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 360px) minmax(0, 180px);
-  gap: 18px;
+/* Tempo + drum preset row — wraps when there's not enough horizontal room */
+.tempo-and-preset {
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
-  justify-content: start;
+  gap: 18px;
   margin-bottom: 14px;
 }
+.tempo-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+  align-items: end;
+  flex: 0 1 558px;
+  max-width: 558px;
+  min-width: 240px;
+}
+.drum-preset-wrap {
+  flex: 0 1 220px;
+  min-width: 200px;
+  display: flex;
+  align-items: end;
+}
+.drum-preset-wrap .preset-select { max-width: none; }
 
 .control {
   display: flex;
@@ -244,14 +255,21 @@ button.primary:hover { filter: brightness(1.05); }
 
 select {
   appearance: none;
-  background: var(--panel);
+  -webkit-appearance: none;
+  background-color: var(--panel);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='4 6 8 10 12 6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 6px 28px 6px 8px;
   font-size: 14px;
   color: var(--ink);
   font-family: inherit;
+  cursor: pointer;
 }
+select:hover { border-color: var(--accent); }
 
 input[type=range] {
   -webkit-appearance: none;
@@ -288,7 +306,9 @@ input[type=range]::-moz-range-thumb {
 }
 .track,
 .track-head,
-.track-steps { display: contents; }
+.track-steps,
+.track-toggle-wrap,
+.track-controls { display: contents; }
 .grid .track-label {
   font-size: 13px;
   font-weight: 500;
@@ -305,6 +325,7 @@ input[type=range]::-moz-range-thumb {
   color: white;
   border-color: var(--ink-soft);
 }
+.track-toggle { display: none; }
 .step {
   height: 32px;
   background: var(--panel);
@@ -430,11 +451,84 @@ footer {
 @media (max-width: 640px) {
   h1.brand { font-size: 34px; }
   .subtitle { font-size: 11px; letter-spacing: 0.12em; }
+
+  /* Hide vol/mute columns; show toggle icon that opens a mixer popover */
   .grid {
-    grid-template-columns: 44px 40px 22px repeat(16, minmax(0, 1fr));
+    grid-template-columns: 48px 26px repeat(16, minmax(0, 1fr));
     gap: 3px;
   }
+  .grid .track-vol,
+  .grid .track-mute { display: none; }
+  .track-toggle-wrap {
+    display: block;
+    position: relative;
+  }
+  .track-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .track-toggle:hover { border-color: var(--accent); color: var(--ink); }
+  .track-toggle svg { display: block; }
+  .track-toggle-wrap.open .track-toggle {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .track-controls {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 20;
+    align-items: center;
+    gap: 10px;
+    width: 200px;
+    padding: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+  }
+  .track-toggle-wrap.open .track-controls { display: flex; }
+  .track-controls .track-vol {
+    display: block;
+    flex: 1;
+    width: auto;
+  }
+  .track-controls .track-mute {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    font-size: 11px;
+    border-radius: 4px;
+  }
+  .track-controls .track-mute.muted {
+    background: var(--ink-soft);
+    color: white;
+    border-color: var(--ink-soft);
+  }
+
   .grid .track-label { font-size: 11px; }
   .step { height: 24px; }
-  .chord-slots { grid-template-columns: repeat(2, 1fr); }
+
+  .chord-slots { gap: 6px; }
+  .chord-slot {
+    padding: 10px 4px 16px;
+    min-height: 72px;
+  }
+  .chord-slot .name { font-size: 17px; }
+  .chord-slot .deg { font-size: 10px; }
+  .chord-slot .mute { width: 20px; height: 18px; }
 }
