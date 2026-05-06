@@ -73,10 +73,10 @@ const TRACKS = [
 
 // ---------- Chord progression presets (rap / freestyle staples) ----------
 const CHORD_PRESETS = [
+  { name: 'i–iv–VII–III (Boom Bap)',      scale: 'minor', degrees: [0, 3, 6, 2] },
   { name: 'i–VII–VI–VII (Lose Yourself)', scale: 'minor', degrees: [0, 6, 5, 6] },
   { name: 'i–VI–III–VII (Mockingbird)',   scale: 'minor', degrees: [0, 5, 2, 6] },
   { name: 'i–VI–VII–i (Drill)',           scale: 'minor', degrees: [0, 5, 6, 0] },
-  { name: 'i–iv–VII–III (Boom Bap)',      scale: 'minor', degrees: [0, 3, 6, 2] },
   { name: 'i–VII–VI–i (Started)',         scale: 'minor', degrees: [0, 6, 5, 0] }
 ];
 
