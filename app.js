@@ -16,6 +16,8 @@ const SCALES = {
 };
 
 // ---------- Beat styles ----------
+// Internally these are "styles" (pattern + bpm + swing + seventh flag).
+// The UI surfaces them as "drum presets" — same data, different label.
 const STYLES = {
   boombap: {
     name: 'Boom Bap', bpm: 92, swing: 24, seventh: false,
@@ -64,11 +66,13 @@ const STYLES = {
   }
 };
 
+// `gain` is the per-track ceiling fed into the synth voice; the slider's
+// 0–1 value (state.volumes[id]) multiplies it.
 const TRACKS = [
-  { id: 'kick',  label: 'Kick' },
-  { id: 'snare', label: 'Snare' },
-  { id: 'hh',    label: 'Hi-hat' },
-  { id: 'oh',    label: 'Open Hat' }
+  { id: 'kick',  label: 'Kick',     gain: 1.0  },
+  { id: 'snare', label: 'Snare',    gain: 0.85 },
+  { id: 'hh',    label: 'Hi-hat',   gain: 0.45 },
+  { id: 'oh',    label: 'Open Hat', gain: 0.40 }
 ];
 
 // ---------- Chord progression presets (rap / freestyle staples) ----------
@@ -87,19 +91,15 @@ const state = {
   swing: 24,
   master: 0.75,
   key: 0,
-  scale: 'minor',
+  scale: CHORD_PRESETS[0].scale,
   chordsPerBar: 1,
+  chordPeriod: 16, // derived from chordsPerBar; updated when it changes
   pattern: emptyPattern(),
   volumes: { kick: 1.0, snare: 0.85, hh: 0.45, oh: 0.45 },
   muted:   { kick: false, snare: false, hh: false, oh: false },
   sectionVolumes: { drums: 0.9, chords: 0.4 },
   sectionMuted:   { drums: false, chords: false },
-  chordSlots: [
-    { degree: 0, on: true },
-    { degree: 5, on: true },
-    { degree: 6, on: true },
-    { degree: 4, on: true }
-  ],
+  chordSlots: CHORD_PRESETS[0].degrees.map(d => ({ degree: d, on: true })),
   currentStep: 0,
   globalStep: 0,
   currentChord: 0
@@ -135,7 +135,9 @@ function initAudio() {
   chordsGain.gain.value = state.sectionMuted.chords ? 0 : state.sectionVolumes.chords;
   chordsGain.connect(masterGain);
 
-  const len = ctx.sampleRate * 2;
+  // 1s is enough — open-hat tail is ~0.3s real time, played back at 1.5x rate
+  // (~0.45s of buffer); a snare brush is ~0.22s with rate ≤ 1.1.
+  const len = Math.floor(ctx.sampleRate * 1.0);
   noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
   const data = noiseBuffer.getChannelData(0);
   for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
@@ -344,19 +346,20 @@ function scheduleEvents(step, time) {
     if (!state.pattern[t.id][step]) return;
     const v = state.volumes[t.id];
     if (v <= 0) return;
+    const g = t.gain * v;
     switch (t.id) {
-      case 'kick':  playKick(time, 1.0 * v); break;
+      case 'kick':  playKick(time, g); break;
       case 'snare': {
         const brushy = state.style === 'jazzhop' || state.style === 'lofi';
-        playSnare(time, 0.85 * v, brushy);
+        playSnare(time, g, brushy);
         break;
       }
-      case 'hh': playHat(time, false, 0.45 * v); break;
-      case 'oh': playHat(time, true, 0.40 * v); break;
+      case 'hh': playHat(time, false, g); break;
+      case 'oh': playHat(time, true, g); break;
     }
   });
 
-  const period = Math.max(1, Math.floor(16 / state.chordsPerBar));
+  const period = state.chordPeriod;
   if (state.globalStep % period === 0) {
     const chordIdx = Math.floor(state.globalStep / period) % 4;
     state.currentChord = chordIdx;
@@ -394,7 +397,7 @@ function uiLoop() {
 }
 
 function setPlayLabel(playing) {
-  const btn = document.getElementById('playBtn');
+  const btn = els.playBtn;
   btn.textContent = playing ? 'Stop' : 'Play';
   btn.classList.toggle('primary', !playing);
 }
@@ -413,14 +416,23 @@ async function start() {
 
 function stop() {
   isPlaying = false;
-  if (timerID) clearTimeout(timerID);
+  if (timerID) { clearTimeout(timerID); timerID = null; }
   stepQueue.length = 0;
   setPlayLabel(false);
-  document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
-  document.querySelectorAll('.chord-slot.playing').forEach(el => el.classList.remove('playing'));
+  clearPlayingHighlights();
 }
 
 // ---------- UI rendering ----------
+// Cached DOM references — populated in init().
+const els = {};
+
+// Per-step / per-chord rebuild caches: filled during render so
+// highlight*() doesn't have to query the DOM.
+let stepCellsByIndex = Array.from({ length: 16 }, () => []);
+let chordSlotEls = [];
+let lastStepCells = [];
+let lastChordEl = null;
+
 let openTrackPopover = null;
 function closeOpenTrackPopover() {
   if (openTrackPopover) {
@@ -428,12 +440,21 @@ function closeOpenTrackPopover() {
     openTrackPopover = null;
   }
 }
+function togglePopover(wrap) {
+  const wasOpen = wrap.classList.contains('open');
+  closeOpenTrackPopover();
+  if (!wasOpen) {
+    wrap.classList.add('open');
+    openTrackPopover = wrap;
+  }
+}
 
-const MIXER_ICON_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="2" y="4" width="2" height="8"/><rect x="7" y="2" width="2" height="12"/><rect x="12" y="6" width="2" height="6"/></svg>';
+const MIXER_ICON_MARKUP = '<svg width="14" height="14" fill="currentColor" aria-hidden="true"><use href="#mixerIcon"/></svg>';
 
 function renderGrid() {
-  const grid = document.getElementById('grid');
+  const grid = els.grid;
   grid.innerHTML = '';
+  stepCellsByIndex = Array.from({ length: 16 }, () => []);
   TRACKS.forEach(t => {
     const track = document.createElement('div');
     track.className = 'track';
@@ -453,20 +474,16 @@ function renderGrid() {
     toggleBtn.className = 'track-toggle';
     toggleBtn.type = 'button';
     toggleBtn.title = `${t.label} mixer`;
-    toggleBtn.innerHTML = MIXER_ICON_SVG;
+    toggleBtn.setAttribute('aria-label', `${t.label} mixer`);
+    toggleBtn.innerHTML = MIXER_ICON_MARKUP;
     toggleBtn.addEventListener('click', e => {
       e.stopPropagation();
-      const wasOpen = toggleWrap.classList.contains('open');
-      closeOpenTrackPopover();
-      if (!wasOpen) {
-        toggleWrap.classList.add('open');
-        openTrackPopover = toggleWrap;
-      }
+      togglePopover(toggleWrap);
     });
     toggleWrap.appendChild(toggleBtn);
 
     const controls = document.createElement('div');
-    controls.className = 'track-controls';
+    controls.className = 'track-controls popover-panel';
     controls.addEventListener('click', e => e.stopPropagation());
 
     const vol = document.createElement('input');
@@ -475,6 +492,7 @@ function renderGrid() {
     vol.min = 0; vol.max = 100;
     vol.value = Math.round(state.volumes[t.id] * 100);
     vol.title = `${t.label} volume`;
+    vol.setAttribute('aria-label', `${t.label} volume`);
     vol.addEventListener('input', () => { state.volumes[t.id] = vol.value / 100; });
     controls.appendChild(vol);
 
@@ -483,6 +501,7 @@ function renderGrid() {
     mute.textContent = 'M';
     mute.type = 'button';
     mute.title = `Mute ${t.label}`;
+    mute.setAttribute('aria-label', `Mute ${t.label}`);
     mute.addEventListener('click', () => {
       state.muted[t.id] = !state.muted[t.id];
       mute.classList.toggle('muted', state.muted[t.id]);
@@ -502,11 +521,22 @@ function renderGrid() {
       if (state.pattern[t.id][i]) step.classList.add('on');
       step.dataset.track = t.id;
       step.dataset.step = i;
-      step.addEventListener('click', () => {
+      step.setAttribute('role', 'button');
+      step.tabIndex = 0;
+      step.setAttribute('aria-label', `${t.label} step ${i + 1}`);
+      const toggleStep = () => {
         state.pattern[t.id][i] = state.pattern[t.id][i] ? 0 : 1;
         step.classList.toggle('on');
+      };
+      step.addEventListener('click', toggleStep);
+      step.addEventListener('keydown', e => {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          toggleStep();
+        }
       });
       steps.appendChild(step);
+      stepCellsByIndex[i].push(step);
     }
     track.appendChild(steps);
 
@@ -514,9 +544,30 @@ function renderGrid() {
   });
 }
 
+// Cheap re-sync of `.on` classes without rebuilding the grid; used by
+// applyStyle and randomizeBeat where the pattern values change but the
+// DOM structure does not.
+function syncGridFromPattern() {
+  for (let i = 0; i < 16; i++) {
+    stepCellsByIndex[i].forEach(cell => {
+      cell.classList.toggle('on', !!state.pattern[cell.dataset.track][i]);
+    });
+  }
+}
+
 function highlightStep(step) {
-  document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
-  document.querySelectorAll(`.step[data-step="${step}"]`).forEach(el => el.classList.add('playing'));
+  lastStepCells.forEach(el => el.classList.remove('playing'));
+  lastStepCells = stepCellsByIndex[step] || [];
+  lastStepCells.forEach(el => el.classList.add('playing'));
+}
+
+function clearPlayingHighlights() {
+  lastStepCells.forEach(el => el.classList.remove('playing'));
+  lastStepCells = [];
+  if (lastChordEl) {
+    lastChordEl.classList.remove('playing');
+    lastChordEl = null;
+  }
 }
 
 function applySectionGain(section) {
@@ -527,13 +578,15 @@ function applySectionGain(section) {
 }
 
 function renderChordSlots() {
-  const wrap = document.getElementById('chordSlots');
+  const wrap = els.chordSlots;
   wrap.innerHTML = '';
+  chordSlotEls = [];
   const sc = getChordScale();
   state.chordSlots.forEach((slot, i) => {
     const el = document.createElement('div');
     el.className = 'chord-slot' + (slot.on ? ' on' : ' off');
     el.dataset.idx = i;
+    chordSlotEls.push(el);
 
     const sel = document.createElement('select');
     sel.title = 'Change chord';
@@ -543,7 +596,7 @@ function renderChordSlots() {
       opt.textContent = `${chordRoman(d)} — ${chordName(d)}`;
       sel.appendChild(opt);
     }
-    sel.value = Math.min(slot.degree, sc.length - 1);
+    sel.value = slot.degree;
     el.appendChild(sel);
 
     const name = document.createElement('div');
@@ -565,7 +618,12 @@ function renderChordSlots() {
     const mute = document.createElement('button');
     mute.className = 'mute';
     mute.textContent = 'M';
-    mute.title = slot.on ? 'Mute chord' : 'Unmute chord';
+    const setMuteHint = () => {
+      const hint = slot.on ? 'Mute chord' : 'Unmute chord';
+      mute.title = hint;
+      mute.setAttribute('aria-label', hint);
+    };
+    setMuteHint();
     mute.addEventListener('mousedown', e => e.stopPropagation());
     mute.addEventListener('click', e => {
       e.stopPropagation();
@@ -573,7 +631,7 @@ function renderChordSlots() {
       slot.on = !slot.on;
       el.classList.toggle('on', slot.on);
       el.classList.toggle('off', !slot.on);
-      mute.title = slot.on ? 'Mute chord' : 'Unmute chord';
+      setMuteHint();
     });
     el.appendChild(mute);
 
@@ -582,9 +640,9 @@ function renderChordSlots() {
 }
 
 function highlightChord(idx) {
-  document.querySelectorAll('.chord-slot.playing').forEach(el => el.classList.remove('playing'));
-  const el = document.querySelector(`.chord-slot[data-idx="${idx}"]`);
-  if (el) el.classList.add('playing');
+  if (lastChordEl) lastChordEl.classList.remove('playing');
+  lastChordEl = chordSlotEls[idx] || null;
+  if (lastChordEl) lastChordEl.classList.add('playing');
 }
 
 // ---------- Style application ----------
@@ -593,20 +651,18 @@ function applyStyle(styleKey) {
   state.style = styleKey;
   setBPM(s.bpm);
   state.swing = s.swing;
-  state.pattern = JSON.parse(JSON.stringify(s.pattern));
-  document.getElementById('swing').value = state.swing;
-  document.getElementById('swingVal').textContent = state.swing + '%';
-
-  const drumSel = document.getElementById('drumPreset');
-  if (drumSel) drumSel.value = styleKey;
-  renderGrid();
+  state.pattern = structuredClone(s.pattern);
+  els.swing.value = state.swing;
+  els.swingVal.textContent = state.swing + '%';
+  if (els.drumPreset) els.drumPreset.value = styleKey;
+  syncGridFromPattern();
 }
 
 function setBPM(bpm) {
   bpm = Math.max(60, Math.min(240, Math.round(bpm)));
   state.bpm = bpm;
-  document.getElementById('bpm').value = bpm;
-  document.getElementById('bpmNum').value = bpm;
+  els.bpm.value = bpm;
+  els.bpmNum.value = bpm;
 }
 
 // ---------- Random beat ----------
@@ -641,26 +697,23 @@ function randomizeBeat() {
   }
 
   state.pattern = p;
-  renderGrid();
+  syncGridFromPattern();
 }
 
 // ---------- Chord preset application ----------
 function applyChordPreset(preset) {
   state.scale = preset.scale;
-  document.getElementById('scale').value = preset.scale;
-  const max = getChordScale().length;
+  els.scale.value = preset.scale;
   state.chordSlots.forEach((slot, i) => {
-    slot.degree = (preset.degrees[i] || 0) % max;
+    slot.degree = preset.degrees[i] || 0;
     slot.on = true;
   });
   renderChordSlots();
 }
 
 // ---------- Random progression ----------
-function randomProgression() {
-  const sc = getChordScale();
-  const max = sc.length;
-  const pool = [0, 0, 1, 2, 3, 3, 4, 4, 5, 5, 6].filter(d => d < max);
+function randomizeChords() {
+  const pool = [0, 0, 1, 2, 3, 3, 4, 4, 5, 5, 6];
   const prog = [0];
   while (prog.length < 4) {
     const d = pool[Math.floor(Math.random() * pool.length)];
@@ -671,103 +724,112 @@ function randomProgression() {
 }
 
 // ---------- Tap tempo ----------
-let tapTimes = [];
+const TAP_WINDOW_MS = 2500;
+const tapTimes = [];
 function tap() {
   const now = performance.now();
-  tapTimes = tapTimes.filter(t => now - t < 2500);
+  while (tapTimes.length && now - tapTimes[0] >= TAP_WINDOW_MS) tapTimes.shift();
   tapTimes.push(now);
   if (tapTimes.length >= 2) {
-    const intervals = [];
-    for (let i = 1; i < tapTimes.length; i++) intervals.push(tapTimes[i] - tapTimes[i - 1]);
-    const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    // mean interval = total span / (count − 1)
+    const avg = (tapTimes[tapTimes.length - 1] - tapTimes[0]) / (tapTimes.length - 1);
     setBPM(Math.round(60000 / avg));
   }
 }
 
 // ---------- Init / wiring ----------
+function cacheEls() {
+  const ids = [
+    'grid', 'chordSlots',
+    'bpm', 'bpmNum', 'swing', 'swingVal', 'master',
+    'key', 'scale', 'chordsPerBar',
+    'drumPreset', 'chordPreset',
+    'playBtn', 'tapBtn', 'randBeatBtn', 'randChordBtn'
+  ];
+  ids.forEach(id => { els[id] = document.getElementById(id); });
+}
+
 function init() {
+  cacheEls();
+
   // Key dropdown
-  const keySel = document.getElementById('key');
   NOTE_NAMES.forEach((n, i) => {
     const o = document.createElement('option');
     o.value = i; o.textContent = n;
-    keySel.appendChild(o);
+    els.key.appendChild(o);
   });
-  keySel.value = state.key;
-  keySel.addEventListener('change', () => {
-    state.key = parseInt(keySel.value, 10);
+  els.key.value = state.key;
+  els.key.addEventListener('change', () => {
+    state.key = parseInt(els.key.value, 10);
     renderChordSlots();
   });
 
-  document.getElementById('scale').value = state.scale;
-  document.getElementById('scale').addEventListener('change', e => {
+  els.scale.value = state.scale;
+  els.scale.addEventListener('change', e => {
     state.scale = e.target.value;
-    const max = getChordScale().length;
-    state.chordSlots.forEach(s => { if (s.degree >= max) s.degree = s.degree % max; });
     renderChordSlots();
   });
 
   // BPM slider + number input (mirrored)
-  const bpmSlider = document.getElementById('bpm');
-  const bpmNum = document.getElementById('bpmNum');
-  bpmSlider.addEventListener('input', () => setBPM(parseInt(bpmSlider.value, 10)));
-  bpmNum.addEventListener('input', () => {
-    const v = parseInt(bpmNum.value, 10);
+  els.bpm.addEventListener('input', () => setBPM(parseInt(els.bpm.value, 10)));
+  els.bpmNum.addEventListener('input', () => {
+    const v = parseInt(els.bpmNum.value, 10);
     if (!isNaN(v)) state.bpm = Math.max(60, Math.min(240, v));
-    document.getElementById('bpm').value = state.bpm;
+    els.bpm.value = state.bpm;
   });
-  bpmNum.addEventListener('change', () => setBPM(parseInt(bpmNum.value, 10) || state.bpm));
+  els.bpmNum.addEventListener('change', () => setBPM(parseInt(els.bpmNum.value, 10) || state.bpm));
 
   // Swing
-  const swingSlider = document.getElementById('swing');
-  swingSlider.addEventListener('input', () => {
-    state.swing = parseInt(swingSlider.value, 10);
-    document.getElementById('swingVal').textContent = state.swing + '%';
+  els.swing.addEventListener('input', () => {
+    state.swing = parseInt(els.swing.value, 10);
+    els.swingVal.textContent = state.swing + '%';
   });
 
   // Master
-  const masterSlider = document.getElementById('master');
-  masterSlider.addEventListener('input', () => {
-    state.master = masterSlider.value / 100;
+  els.master.addEventListener('input', () => {
+    state.master = els.master.value / 100;
     if (masterGain) masterGain.gain.setTargetAtTime(state.master, ctx.currentTime, 0.02);
   });
 
-  document.getElementById('chordsPerBar').addEventListener('change', e => {
+  els.chordsPerBar.addEventListener('change', e => {
     state.chordsPerBar = parseInt(e.target.value, 10);
+    state.chordPeriod = Math.max(1, Math.floor(16 / state.chordsPerBar));
   });
 
   // Drum preset dropdown
-  const drumSel = document.getElementById('drumPreset');
   Object.keys(STYLES).forEach(key => {
     const opt = document.createElement('option');
     opt.value = key;
     opt.textContent = STYLES[key].name;
-    drumSel.appendChild(opt);
+    els.drumPreset.appendChild(opt);
   });
-  drumSel.addEventListener('change', () => applyStyle(drumSel.value));
+  els.drumPreset.addEventListener('change', () => applyStyle(els.drumPreset.value));
+
+  // Build the grid once before the first applyStyle so syncGridFromPattern
+  // has cells to update.
+  renderGrid();
   applyStyle('boombap');
 
   // Chord preset dropdown
-  const chordSel = document.getElementById('chordPreset');
   CHORD_PRESETS.forEach((p, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
     opt.textContent = p.name;
-    chordSel.appendChild(opt);
+    els.chordPreset.appendChild(opt);
   });
-  chordSel.addEventListener('change', () => {
-    const idx = parseInt(chordSel.value, 10);
+  els.chordPreset.addEventListener('change', () => {
+    const idx = parseInt(els.chordPreset.value, 10);
     if (!isNaN(idx)) applyChordPreset(CHORD_PRESETS[idx]);
   });
   applyChordPreset(CHORD_PRESETS[0]);
 
   // Transport
-  document.getElementById('playBtn').addEventListener('click', () => {
+  els.playBtn.addEventListener('click', () => {
     if (isPlaying) stop(); else start();
   });
-  document.getElementById('tapBtn').addEventListener('click', tap);
-  document.getElementById('randBeatBtn').addEventListener('click', randomizeBeat);
-  document.getElementById('randChordBtn').addEventListener('click', randomProgression);
+  els.tapBtn.addEventListener('click', tap);
+  els.randBeatBtn.addEventListener('click', randomizeBeat);
+  els.randChordBtn.addEventListener('click', randomizeChords);
 
   // Section mixers (drums + chords) — icon button toggles popover with vol slider + mute
   ['drums', 'chords'].forEach(section => {
@@ -781,12 +843,7 @@ function init() {
 
     toggle.addEventListener('click', e => {
       e.stopPropagation();
-      const wasOpen = wrap.classList.contains('open');
-      closeOpenTrackPopover();
-      if (!wasOpen) {
-        wrap.classList.add('open');
-        openTrackPopover = wrap;
-      }
+      togglePopover(wrap);
     });
     wrap.querySelector('.section-mixer-controls').addEventListener('click', e => e.stopPropagation());
 

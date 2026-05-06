@@ -240,13 +240,14 @@ button.primary:hover { filter: brightness(1.05); }
   color: var(--ink);
   text-align: center;
   font-family: inherit;
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 .bpm-extras input[type=number]::-webkit-outer-spin-button,
 .bpm-extras input[type=number]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-.bpm-extras input[type=number] { -moz-appearance: textfield; }
 .tap-btn {
   padding: 4px 10px;
   font-size: 12px;
@@ -320,11 +321,6 @@ input[type=range]::-moz-range-thumb {
   padding: 4px 0;
   border-radius: 4px;
 }
-.grid .track-mute.muted {
-  background: var(--ink-soft);
-  color: white;
-  border-color: var(--ink-soft);
-}
 .track-toggle { display: none; }
 .step {
   height: 32px;
@@ -343,6 +339,10 @@ input[type=range]::-moz-range-thumb {
 .step.playing {
   outline: 2px solid var(--good);
   outline-offset: 1px;
+}
+.step:focus { outline: none; }
+.step:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* Chord section */
@@ -430,11 +430,6 @@ input[type=range]::-moz-range-thumb {
   border-color: var(--accent);
   color: var(--ink);
 }
-.chord-slot.off .mute {
-  background: var(--ink-soft);
-  border-color: var(--ink-soft);
-  color: white;
-}
 
 /* Section mixer (icon button + popover with vol slider + mute) */
 .section-mixer {
@@ -465,11 +460,9 @@ input[type=range]::-moz-range-thumb {
   border-color: var(--accent);
   color: white;
 }
-.section-mixer-controls {
-  display: none;
+.popover-panel {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
   z-index: 20;
   align-items: center;
   gap: 10px;
@@ -479,6 +472,10 @@ input[type=range]::-moz-range-thumb {
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+.section-mixer-controls {
+  display: none;
+  right: 0;
 }
 .section-mixer.open .section-mixer-controls { display: flex; }
 .section-mixer .section-vol { flex: 1; min-width: 0; }
@@ -493,7 +490,12 @@ input[type=range]::-moz-range-thumb {
   font-weight: 600;
   border-radius: 4px;
 }
-.card-head .section-mixer .section-mute.muted {
+/* Shared muted-button style — applies to track mutes (desktop + mobile),
+   section mixer mutes, and the per-chord-slot mute when the slot is off. */
+.grid .track-mute.muted,
+.track-controls .track-mute.muted,
+.card-head .section-mixer .section-mute.muted,
+.chord-slot.off .mute {
   background: var(--ink-soft);
   color: white;
   border-color: var(--ink-soft);
@@ -548,18 +550,7 @@ footer {
   }
   .track-controls {
     display: none;
-    position: absolute;
-    top: calc(100% + 6px);
     left: 0;
-    z-index: 20;
-    align-items: center;
-    gap: 10px;
-    width: 200px;
-    padding: 10px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: var(--shadow);
   }
   .track-toggle-wrap.open .track-controls { display: flex; }
   .track-controls .track-vol {
@@ -576,11 +567,6 @@ footer {
     padding: 0;
     font-size: 11px;
     border-radius: 4px;
-  }
-  .track-controls .track-mute.muted {
-    background: var(--ink-soft);
-    color: white;
-    border-color: var(--ink-soft);
   }
 
   .grid .track-label { font-size: 11px; }
