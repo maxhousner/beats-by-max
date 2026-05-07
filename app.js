@@ -16,11 +16,12 @@ const SCALES = {
 };
 
 // ---------- Beat styles ----------
-// Internally these are "styles" (pattern + bpm + swing + seventh flag).
+// Internally these are "styles" (pattern + bpm + swing).
 // The UI surfaces them as "drum presets" — same data, different label.
+// Drum presets only affect drums; chord behavior is set by chord presets.
 const STYLES = {
   boombap: {
-    name: 'Boom Bap', bpm: 92, swing: 24, seventh: false,
+    name: 'Boom Bap', bpm: 92, swing: 24,
     pattern: {
       kick:  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -29,7 +30,7 @@ const STYLES = {
     }
   },
   trap: {
-    name: 'Trap', bpm: 142, swing: 0, seventh: false,
+    name: 'Trap', bpm: 142, swing: 0,
     pattern: {
       kick:  [1,0,0,0, 0,0,1,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -38,7 +39,7 @@ const STYLES = {
     }
   },
   lofi: {
-    name: 'Lo-fi', bpm: 78, swing: 50, seventh: true,
+    name: 'Lo-fi', bpm: 78, swing: 50,
     pattern: {
       kick:  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -47,7 +48,7 @@ const STYLES = {
     }
   },
   drill: {
-    name: 'Drill', bpm: 144, swing: 0, seventh: false,
+    name: 'Drill', bpm: 144, swing: 0,
     pattern: {
       kick:  [1,0,0,0, 0,0,1,0, 0,0,1,1, 0,0,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -56,7 +57,7 @@ const STYLES = {
     }
   },
   jazzhop: {
-    name: 'Jazz-hop', bpm: 88, swing: 40, seventh: true,
+    name: 'Jazz-hop', bpm: 88, swing: 40,
     pattern: {
       kick:  [1,0,0,0, 0,0,0,1, 0,0,0,0, 0,1,0,0],
       snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -76,12 +77,13 @@ const TRACKS = [
 ];
 
 // ---------- Chord progression presets (rap / freestyle staples) ----------
+// `seventh: true` builds 7th chords from the scale (preset opts in to the jazzy flavor).
 const CHORD_PRESETS = [
-  { name: 'i–iv–VII–III (Boom Bap)',      scale: 'minor', degrees: [0, 3, 6, 2] },
-  { name: 'i–VII–VI–VII (Lose Yourself)', scale: 'minor', degrees: [0, 6, 5, 6] },
-  { name: 'i–VI–III–VII (Mockingbird)',   scale: 'minor', degrees: [0, 5, 2, 6] },
-  { name: 'i–VI–VII–i (Drill)',           scale: 'minor', degrees: [0, 5, 6, 0] },
-  { name: 'i–VII–VI–i (Started)',         scale: 'minor', degrees: [0, 6, 5, 0] }
+  { name: 'i–iv–VII–III (Boom Bap)',      scale: 'minor', degrees: [0, 3, 6, 2], seventh: false },
+  { name: 'i–VII–VI–VII (Lose Yourself)', scale: 'minor', degrees: [0, 6, 5, 6], seventh: false },
+  { name: 'i–VI–III–VII (Mockingbird)',   scale: 'minor', degrees: [0, 5, 2, 6], seventh: true  },
+  { name: 'i–VI–VII–i (Drill)',           scale: 'minor', degrees: [0, 5, 6, 0], seventh: false },
+  { name: 'i–VII–VI–i (Started)',         scale: 'minor', degrees: [0, 6, 5, 0], seventh: false }
 ];
 
 // ---------- App state ----------
@@ -92,6 +94,7 @@ const state = {
   master: 0.75,
   key: 0,
   scale: CHORD_PRESETS[0].scale,
+  seventh: CHORD_PRESETS[0].seventh,
   chordsPerBar: 1,
   chordPeriod: 16, // derived from chordsPerBar; updated when it changes
   pattern: emptyPattern(),
@@ -289,7 +292,7 @@ function chordSemis(degree, withSeventh = false) {
 }
 
 function chordName(degree) {
-  const semis = chordSemis(degree, false);
+  const semis = chordSemis(degree, state.seventh);
   const root = NOTE_NAMES[((state.key + semis[0]) % 12 + 12) % 12];
   const third = semis[1] - semis[0];
   const fifth = semis[2] - semis[0];
@@ -298,18 +301,32 @@ function chordName(degree) {
   else if (third === 4 && fifth === 7) q = '';
   else if (third === 3 && fifth === 6) q = 'dim';
   else if (third === 4 && fifth === 8) q = 'aug';
+  if (semis.length >= 4) {
+    const seventh = semis[3] - semis[0];
+    if (q === 'dim' && seventh === 10) return root + 'm7♭5';
+    if (q === 'm'   && seventh === 11) return root + 'm(maj7)';
+    if (q === 'm')                     return root + 'm7';
+    if (q === ''    && seventh === 11) return root + 'maj7';
+    if (q === '')                      return root + '7';
+    return root + q + '7';
+  }
   return root + q;
 }
 
 function chordRoman(degree) {
   const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
-  const semis = chordSemis(degree, false);
+  const semis = chordSemis(degree, state.seventh);
   const third = semis[1] - semis[0];
   const fifth = semis[2] - semis[0];
   let n = numerals[degree % 7];
   if (third === 3) n = n.toLowerCase();
   if (fifth === 6) n += '°';
   if (fifth === 8) n += '+';
+  if (semis.length >= 4) {
+    const seventh = semis[3] - semis[0];
+    const isMajorTriad = third === 4 && fifth === 7;
+    n += (isMajorTriad && seventh === 11) ? 'maj7' : '7';
+  }
   return n;
 }
 
@@ -366,8 +383,7 @@ function scheduleEvents(step, time) {
     const slot = state.chordSlots[chordIdx];
     if (slot && slot.on) {
       const dur = period * stepDuration();
-      const withSeventh = STYLES[state.style].seventh;
-      const semis = chordSemis(slot.degree, withSeventh);
+      const semis = chordSemis(slot.degree, state.seventh);
       playChord(time, semis, dur * 0.97);
     }
     stepQueue.push({ kind: 'chord', idx: chordIdx, time });
@@ -704,6 +720,8 @@ function randomizeBeat() {
 function applyChordPreset(preset) {
   state.scale = preset.scale;
   els.scale.value = preset.scale;
+  state.seventh = !!preset.seventh;
+  if (els.seventh) els.seventh.value = state.seventh ? 'on' : 'off';
   state.chordSlots.forEach((slot, i) => {
     slot.degree = preset.degrees[i] || 0;
     slot.on = true;
@@ -742,7 +760,7 @@ function cacheEls() {
   const ids = [
     'grid', 'chordSlots',
     'bpm', 'bpmNum', 'swing', 'swingVal', 'master',
-    'key', 'scale', 'chordsPerBar',
+    'key', 'scale', 'chordsPerBar', 'seventh',
     'drumPreset', 'chordPreset',
     'playBtn', 'tapBtn', 'randBeatBtn', 'randChordBtn'
   ];
@@ -794,6 +812,12 @@ function init() {
   els.chordsPerBar.addEventListener('change', e => {
     state.chordsPerBar = parseInt(e.target.value, 10);
     state.chordPeriod = Math.max(1, Math.floor(16 / state.chordsPerBar));
+  });
+
+  els.seventh.value = state.seventh ? 'on' : 'off';
+  els.seventh.addEventListener('change', e => {
+    state.seventh = e.target.value === 'on';
+    renderChordSlots();
   });
 
   // Drum preset dropdown
